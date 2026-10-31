@@ -1,0 +1,8 @@
+numpy
+scipy
+matplotlib
+control
+slycot
+PySide6
+openpyxl
+pyinstaller
