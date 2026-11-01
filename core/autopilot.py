@@ -146,6 +146,16 @@ class APPlant:
     phi_index: int = None    # bank angle index (lateral) for bank limit
     umax_hint: np.ndarray = None  # typical command size for inputs without a deflection limit
     ideal: object = None     # same plant without actuator dynamics (design model, measurable states)
+    meas: list = None        # measured states (output feedback: LQG estimator / H-inf); None = see methods
+    meas_noise: np.ndarray = None  # sensor noise std per measured state (internal units)
+
+    @property
+    def Cm(self):
+        """Measurement matrix of the sensors (only when 'meas' is set)."""
+        Cm = np.zeros((len(self.meas), self.n))
+        for i, k in enumerate(self.meas):
+            Cm[i, k] = 1
+        return Cm
 
     @property
     def design(self):
@@ -521,7 +531,11 @@ def _cost(plant, ctrl, settings, margins_too=True):
     """Scalar tuning cost: tracking error + penalties for violated constraints."""
     cancel.check()
     res = evaluate(plant, ctrl, settings, with_margins=False, quick=True)
-    if not res.stable or not np.all(np.isfinite(res.y)):
+    if not res.stable:
+        # graded, so a search that starts in the unstable region is led towards stability
+        # (a flat value stops differential evolution after its first population)
+        return 1e5 + 1e3 * min(max(float(res.poles.real.max()), 0.0), 100.0), res, None
+    if not np.all(np.isfinite(res.y)):
         return 1e6, res, None
     amp = _amp_internal(plant, settings) * plant.state_scale[plant.ks]
     e = (settings.ref - res.y) / amp
@@ -546,9 +560,11 @@ def _cost(plant, ctrl, settings, margins_too=True):
         mg = loop_margins(plant, ctrl, npts=900)
         gm = abs(mg["gm_db"]) if np.isfinite(mg["gm_db"]) else 99.0
         dm = mg["dm"] if np.isfinite(mg["dm"]) else 99.0
-        # a violated margin always costs more than any tracking gain (fixed step + proportional)
+        # a violated margin always costs more than any tracking gain (fixed step + proportional);
+        # the 1 % guard keeps the optimum off the boundary, where the finer margin computation
+        # of evaluate() could still report a violation
         for val, spec in ((gm, settings.gm_spec), (mg["pm"], settings.pm_spec), (dm, settings.dm_spec)):
-            if val < spec:
+            if val < 1.01 * spec:
                 J += 1.0 + 10 * (spec - val) / spec
     return J, res, mg
 
@@ -729,27 +745,41 @@ def make_lqg(plant, lqi_ctrl, Qn, Rn):
     full, plant = plant, plant.design
     n, p, q = plant.n, plant.p, plant.q
     A, Bq, C = plant.A, plant.Bq, plant.C
+    # the estimator uses the sensors when they are declared, otherwise the tracked outputs
+    Cy = plant.Cm if plant.meas else C
+    Qn = np.asarray(Qn, float)
+    if Qn.ndim == 1 and Qn.size == n * n:          # flattened matrix from the parameter table
+        Qn = Qn.reshape(n, n)
     Qn = np.atleast_2d(Qn)
     if Qn.shape == (1, 1):
         Qn = Qn[0, 0] * np.eye(n)
     Rn = np.diag(np.atleast_1d(Rn)) if np.ndim(Rn) < 2 else np.atleast_2d(Rn)
-    P = scipy.linalg.solve_continuous_are(A.T, C.T, Qn, Rn)
-    L = P @ C.T @ np.linalg.inv(Rn)
+    P = scipy.linalg.solve_continuous_are(A.T, Cy.T, Qn, Rn)
+    L = P @ Cy.T @ np.linalg.inv(Rn)
     K = lqi_ctrl.info["K"]
     Kx, Ki = K[:, :n], K[:, n:]
-    # states xc = [x_hat (n); xi (p)]
-    Ac = np.block([[A - Bq @ Kx - L @ C, -Bq @ Ki], [-C, np.zeros((p, p))]])
-    Bc = np.block([[np.zeros((n, p)), L @ C], [np.eye(p), np.zeros((p, n))]])
+    if plant.meas:
+        # sensors: estimator corrected by every measurement, integrators on the measured tracked
+        # outputs (xi' = r - y)
+        Ac = np.block([[A - Bq @ Kx - L @ Cy, -Bq @ Ki], [np.zeros((p, n)), np.zeros((p, p))]])
+        Bc = np.block([[np.zeros((n, p)), L @ Cy], [np.eye(p), -C]])
+    else:
+        # states xc = [x_hat (n); xi (p)]
+        Ac = np.block([[A - Bq @ Kx - L @ C, -Bq @ Ki], [-C, np.zeros((p, p))]])
+        Bc = np.block([[np.zeros((n, p)), L @ C], [np.eye(p), np.zeros((p, n))]])
     Cc = np.hstack([-Kx, -Ki])
     Dc = np.zeros((q, p + n))
     g = dict(lqi_ctrl.gains)
+    ynames = [plant.state_names[k] for k in plant.meas] if plant.meas else plant.track_names
     for i, nm in enumerate(plant.state_names):
-        for r, tn in enumerate(plant.track_names):
-            g[f"L_{nm}<-{tn} (Kalman)" if p > 1 else f"L_{nm} (Kalman)"] = float(L[i, r])
+        for r, tn in enumerate(ynames):
+            g[f"L_{nm}<-{tn} (Kalman)" if len(ynames) > 1 else f"L_{nm} (Kalman)"] = float(L[i, r])
     return _embed(Controller("LQG", Ac, Bc, Cc, Dc,
                              {"Q": lqi_ctrl.params["Q"], "R": lqi_ctrl.params["R"],
-                              "Qn": float(Qn[0, 0]), "Rn": np.diag(Rn).tolist()},
-                             g, {"K": K, "L": L, "est_poles": np.linalg.eigvals(A - L @ C)},
+                              "Qn": Qn.tolist() if np.count_nonzero(Qn - np.diag(np.diag(Qn))) or
+                              np.ptp(np.diag(Qn)) > 0 else float(Qn[0, 0]),
+                              "Rn": np.diag(Rn).tolist()},
+                             g, {"K": K, "L": L, "est_poles": np.linalg.eigvals(A - L @ Cy)},
                              int_states=list(range(n, n + p))), full)
 
 
@@ -764,16 +794,26 @@ def tune_lqg(plant, settings, lqi_ctrl=None):
     settings.ensure(plant)
     if lqi_ctrl is None:
         lqi_ctrl = tune_lqi(plant, settings)
-    sig = settings.noise_std / plant.state_scale[plant.ks]
-    Rn = np.maximum(sig, 1e-6) ** 2
+    if plant.design.meas:
+        Rn = np.maximum(np.asarray(plant.design.meas_noise, float), 1e-6) ** 2
+    else:
+        sig = settings.noise_std / plant.state_scale[plant.ks]
+        Rn = np.maximum(sig, 1e-6) ** 2
     J_lqi, _, _ = _cost(plant, lqi_ctrl, settings)
     wc_lqi = loop_margins(plant, lqi_ctrl)["wcp"]
     Aa, Ba = _aug(plant.design)
     w_lqi = np.abs(np.linalg.eigvals(Aa - Ba @ lqi_ctrl.info["K"])).max()
     cands = []
-    for qn in np.logspace(-10, 4, 29):
+    # two process-noise families: white on every state, and loop transfer recovery
+    # (fictitious noise entering with the autopilot commands, q^2 B B', which drives the
+    # loop at the plant input towards the LQI loop)
+    Bq = plant.design.Bq
+    n_d = plant.design.n
+    noises = [qn for qn in np.logspace(-10, 4, 29)]
+    noises += [qn * (Bq @ Bq.T) + 1e-10 * np.eye(n_d) for qn in np.logspace(-6, 8, 15)]
+    for Qn in noises:
         try:
-            c = make_lqg(plant, lqi_ctrl, qn, Rn)
+            c = make_lqg(plant, lqi_ctrl, Qn, Rn)
         except (np.linalg.LinAlgError, ValueError):
             continue
         J, _, _ = _cost(plant, c, settings)
@@ -846,7 +886,11 @@ def make_hinf(plant, W1, W2, W3, W4, nu=1e-2):
     W1 = _vec(W1, p); W2 = _vec(W2, q); W4 = _vec(W4, p)
     Aa, Ba = _aug(plant)
     na = n + p
-    nw = q + na
+    # measurements: every state, or only the sensors (output feedback) when declared
+    Cy = plant.Cm if plant.meas else np.eye(n)
+    ny = Cy.shape[0] + p
+    C2 = np.block([[Cy, np.zeros((Cy.shape[0], p))], [np.zeros((p, n)), np.eye(p)]])
+    nw = q + ny
     B1 = np.zeros((na, nw)); B1[:, :q] = Ba
     nz = p + q + n + p
     C1 = np.zeros((nz, na)); D12 = np.zeros((nz, q))
@@ -855,12 +899,13 @@ def make_hinf(plant, W1, W2, W3, W4, nu=1e-2):
     C1[p + q:p + q + n, :n] = W3 * np.eye(n)
     C1[p + q + n:, n:] = np.diag(W4)
     D11 = np.zeros((nz, nw))
-    D21 = np.zeros((na, nw)); D21[:, q:] = nu * np.eye(na)
-    Ak, Bk, Ck, Dk, gam = hinfsyn_fast(Aa, np.hstack([B1, Ba]), np.vstack([C1, np.eye(na)]),
-                                       np.block([[D11, D12], [D21, np.zeros((na, q))]]), na, q)
+    D21 = np.zeros((ny, nw)); D21[:, q:] = nu * np.eye(ny)
+    Ak, Bk, Ck, Dk, gam = hinfsyn_fast(Aa, np.hstack([B1, Ba]), np.vstack([C1, C2]),
+                                       np.block([[D11, D12], [D21, np.zeros((ny, q))]]), ny, q)
     nk = Ak.shape[0]
-    Bkx, Bke = Bk[:, :n], Bk[:, n:]
-    Dkx, Dke = Dk[:, :n], Dk[:, n:]
+    ns = Cy.shape[0]
+    Bkx, Bke = Bk[:, :ns] @ Cy, Bk[:, ns:]
+    Dkx, Dke = Dk[:, :ns] @ Cy, Dk[:, ns:]
     # controller states [eta (p); xk]; inputs [r_f (p); x_meas (n)]
     Ac = np.block([[np.zeros((p, p)), np.zeros((p, nk))], [Bke, Ak]])
     Bc = np.block([[np.eye(p), -plant.C], [np.zeros((nk, p)), Bkx]])
@@ -899,12 +944,14 @@ def tune_hinf(plant, settings):
             best = (J, c, (a, bta, nu, m2))
 
     # coarse grid; the measurement-noise level nu limits the controller bandwidth
-    # (and therefore protects the delay margin)
+    # (and therefore protects the delay margin): with actuators or a slow airframe the
+    # feasible designs often need nu of a few hundred
     m2s = (1.0, 10.0) if plant.q > 1 else (1.0,)
     for a in (0.3, 3.0, 30.0):
-        for nu in (0.1, 1.0, 10.0):
-            for m2 in m2s:
-                trial(a, 0.5, nu, m2)
+        for nu in (0.1, 1.0, 10.0, 100.0, 1000.0):
+            for bta in (0.05, 0.5, 5.0):
+                for m2 in m2s:
+                    trial(a, bta, nu, m2)
     if best[1] is not None:                      # local refinement around the best point
         a0, b0, n0, m0 = best[2]
         for fa in (0.4, 2.5):
@@ -917,10 +964,11 @@ def tune_hinf(plant, settings):
             trial(a0, b0 * fb, n0, m0)
     if best[1] is not None and not all(evaluate(plant, best[1], settings).feasible.values()):
         # still violating a requirement: try lower-bandwidth designs
-        for a in (100.0, 300.0):
-            for nu in (3.0, 30.0):
-                for m2 in m2s:
-                    trial(a, 0.5, nu, m2)
+        for a in (100.0, 300.0, 1000.0):
+            for nu in (3.0, 10.0, 30.0, 300.0, 3000.0):
+                for bta in (0.05, 0.5):
+                    for m2 in m2s:
+                        trial(a, bta, nu, m2)
     if best[1] is None:
         raise APError("H-infinity synthesis failed for all weight choices.")
     c = best[1]

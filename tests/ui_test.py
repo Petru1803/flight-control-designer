@@ -139,6 +139,26 @@ print("robust SAS:", [(r[0], round(r[1]), round(r[2])) for r in __import__("core
     w.project.robust, w.project)[0]["rows"]], " AP rows:", rt.t_ap.rowCount(), " disk rows:", rt.t_disk.rowCount())
 shot(w, 4, "05r_robust.png")
 
+# flight-controller tab: LQG pitch + H-inf roll -> PX4 module; PID both axes -> ArduPilot .param
+ft = w.fc_tab
+w.tabs.setCurrentIndex(7); app.processEvents()
+ft.s_pitch.setCurrentIndex(ft.s_pitch.findData("LQG")); ft.s_roll.setCurrentIndex(ft.s_roll.findData("Hinf"))
+ft.run()
+wait_jobs()
+assert w.project.fc and set(w.project.fc["designs"]) == {"pitch", "roll"}, "flight-controller design failed"
+files = ft.export_to(os.path.join(OUT, "fc_px4"))
+assert any(f.endswith("fc_controller.c") for f in files), "PX4 module not written"
+print("fc PX4:", [r[:5] for r in ft.t_res.rows_text()] if hasattr(ft.t_res, "rows_text") else "", len(files), "files")
+shot(w, 7, "08_flight_controller.png")
+ft.fw.setCurrentText("ArduPilot")
+ft.s_pitch.setCurrentIndex(ft.s_pitch.findData("PID")); ft.s_roll.setCurrentIndex(ft.s_roll.findData("PID"))
+ft.run()
+wait_jobs()
+files = ft.export_to(os.path.join(OUT, "fc_ardu"))
+assert any(f.endswith(".param") for f in files), "ArduPilot .param not written"
+print("fc ArduPilot:", open(files[0]).read().count("\n"), "lines in", os.path.basename(files[0]))
+shot(w, 7, "08b_flight_controller_ardupilot.png")
+
 et = w.export_tab
 et.folder.setText(os.path.join(OUT, "export"))
 et.c_csv.setChecked(True)

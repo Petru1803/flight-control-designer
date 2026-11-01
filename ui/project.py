@@ -24,6 +24,7 @@ class Project:
         self.hq1797 = None         # dict with results + table rows
         self.robust = None         # Monte Carlo / disk-margin results
         self.aero = None           # aerodynamic data (dict) of the coefficient dialog
+        self.fc = None             # flight-controller export: {"designs": {axis: FCDesign}, "spec": {...}}
         self.ap = {}               # mode -> dict(plant, settings, ctrls, results, noise, sat, digital)
         self.schedule_points = []
         self.schedule = None

@@ -207,6 +207,52 @@ def ap_response(results, plant, settings, title):
     return f
 
 
+def fc_response(designs):
+    """Flight-controller export: attitude steps, continuous (solid) and digital at the export
+    sample time with a one-sample delay (dashed)."""
+    axes = [a for a in ("pitch", "roll") if a in designs]
+    f = new_fig(7.5, 2.9 * max(len(axes), 1) + 0.6)
+    for i, a in enumerate(axes):
+        d = designs[a]
+        ax = f.add_subplot(len(axes), 1, i + 1)
+        r = d.result
+        ax.plot(r.t, r.y[:, 0], lw=1.6, label=f"{d.structure} (continuous)")
+        if d.digital and d.digital.get("stable"):
+            ax.plot(d.digital["t"], d.digital["y"][:, 0], ls="--", lw=1.2,
+                    label=f"digital {1 / d.Ts:.0f} Hz + 1-sample delay")
+        ax.axhline(d.settings.ref[0], color="k", ls=":", lw=1)
+        ax.set_ylabel(("θ" if a == "pitch" else "φ") + " [deg]")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8, loc="best")
+        ax.set_title(f"{a.capitalize()} attitude step ({d.firmware} export)")
+    if f.axes:
+        f.axes[-1].set_xlabel("t [s]")
+    return f
+
+
+def fc_surfaces(designs):
+    rows = []
+    for a in ("pitch", "roll"):
+        if a in designs:
+            d = designs[a]
+            for j in d.plant.js:
+                rows.append((d, j))
+    f = new_fig(7.5, 2.3 * max(len(rows), 1) + 0.6)
+    for i, (d, j) in enumerate(rows):
+        ax = f.add_subplot(len(rows), 1, i + 1)
+        r = d.result
+        ax.plot(r.t, r.delta[:, j], lw=1.4)
+        lim = np.degrees(d.dmax[d.plant.input_names[j]])
+        ax.axhline(lim, color="k", ls="--", lw=1); ax.axhline(-lim, color="k", ls="--", lw=1)
+        ax.set_ylabel(f"{d.plant.input_names[j]} [deg]")
+        ax.grid(True, alpha=0.3)
+        if i == 0:
+            ax.set_title("Surface deflections (dashed: maximum deflection = full torque)")
+    if f.axes:
+        f.axes[-1].set_xlabel("t [s]")
+    return f
+
+
 def ap_effort(results, plant, settings):
     m = plant.B.shape[1]
     f = new_fig(7.5, 2.6 * m + 0.6)

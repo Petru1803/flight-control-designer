@@ -144,12 +144,17 @@ def margins_from_response(w, L):
         f = -m0 / (m1 - m0) if m1 != m0 else 0.5
         wc = 10 ** (lw0 + f * (lw1 - lw0))
         phc = ph[i] + f * (ph[i + 1] - ph[i])
-        pm = (np.degrees(phc) + 180.0) % 360.0
-        if pm > 180:
-            pm -= 360
+        # phase wrapped to (-180, 180]; the margin is the angle between L and the -1 point
+        # (a crossing with phase lead, e.g. +10 deg, is 170 deg away from -1, not -170), and
+        # the delay margin is the lag a pure delay must add to reach -1
+        phw = (np.degrees(phc) + 180.0) % 360.0 - 180.0
+        if phw <= -180.0:
+            phw += 360.0
+        pm = 180.0 - abs(phw)
+        lag = (phw + 180.0) % 360.0
         pms.append(pm)
         wcs.append(wc)
-        dms.append(np.radians(pm) / wc if pm > 0 else 0.0)
+        dms.append(np.radians(lag) / wc)
     if pms:
         k = int(np.argmin(pms))
         res["pm"], res["wcp"] = pms[k], wcs[k]

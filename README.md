@@ -6,16 +6,16 @@
 
 Design stability augmentation systems and autopilots for fixed-wing aircraft, check them against
 MIL-F-8785C / MIL-STD-1797A, stress-test them for robustness and digital implementation,
-and export everything to MATLAB & Simulink.
+and export everything to MATLAB & Simulink — or straight to **PX4 and ArduPilot** autopilots.
 
-![Version](https://img.shields.io/badge/version-1.0.1-3DDC84)
+![Version](https://img.shields.io/badge/version-1.1.1-3DDC84)
 ![Python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white)
 ![Qt](https://img.shields.io/badge/GUI-PySide6-41CD52?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)
 ![Validated](https://img.shields.io/badge/validated%20against-MATLAB%20R2025a-E16737)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 
-![Autopilot tab: five design methods compared on one pitch-attitude hold](docs/screenshots/autopilot_compare.png)
+![Demo: matrices, open-loop modes, SAS, handling qualities, five autopilot designs, robustness, gain schedule and export](docs/demo.gif)
 
 </div>
 
@@ -43,6 +43,7 @@ to change when a requirement fails.
 | **Robustness** | Monte Carlo on the aerodynamic derivatives and disk margins (loop-at-a-time and multi-loop, μ upper bound). |
 | **Gain scheduling** | Designs at several Mach numbers and interpolates the gains across the envelope. |
 | **Export** | PDF report, PNG figures, Excel / CSV, and a **MATLAB package** that rebuilds the closed loop and generates a ready-to-run **Simulink model**. |
+| **PX4 / ArduPilot** | Attitude controllers for fixed-wing drones that use only the autopilot's sensors (rates, attitude, airspeed — no α/β): the firmware's own PID structure auto-tuned and exported as **PX4 `.params` / ArduPilot `.param`**, or **LQG / H∞ output feedback exported as C code + a PX4 module** (`fw_ss_control`) that replaces the rate controller. Digital delay included in the design. |
 | **Workflow** | `.sasproj` projects (results recomputed on open), cancellable long tunings, F1 user guide, *Diagnostics* panel on every design tab, cockpit-style dark UI. |
 
 ## Screenshots
@@ -54,6 +55,10 @@ to change when a requirement fails.
 | ![SAS tab](docs/screenshots/sas.png) | ![Handling qualities tab](docs/screenshots/handling_qualities.png) |
 | **Robustness: Monte Carlo + disk margins** | **Gain schedule across Mach** |
 | ![Robustness tab](docs/screenshots/robustness.png) | ![Gain schedule tab](docs/screenshots/gain_schedule.png) |
+| **Autopilot: five methods compared** | **Digital implementation check** |
+| ![Autopilot tab](docs/screenshots/autopilot_compare.png) | ![Digital check](docs/screenshots/digital.png) |
+| **PX4 / ArduPilot export** | |
+| ![PX4 / ArduPilot tab](docs/screenshots/px4_ardupilot.png) | |
 
 ## Quick start
 
@@ -82,6 +87,7 @@ Requires Python 3.14 (3.11+ should work). `slycot` provides the SLICOT routines 
 
 ```
 1 Model ─► 2 SAS ─► 3 Handling qualities ─► 4 Autopilot ─► 5 Robustness ─► 6 Gain schedule ─► 7 Export
+                                                                                     └─► 8 PX4 / ArduPilot
 ```
 
 1. **Model** — set the aircraft class (I, II-L, II-C, III, IV) and flight-phase category (A/B/C), the flight
@@ -100,6 +106,15 @@ mydesign_load('closedloop', S, 'theta', 'LQI');   % rebuild the closed loop and 
 mydesign_load('simulink',   S, 'theta', 'LQI');   % generate a Simulink model
 ```
 
+8. **PX4 / ArduPilot** — choose the firmware, the surface deflections and a structure per axis, press
+   **Design**, then **Export**:
+   - PX4: `<name>_px4.params` (firmware PID structure, load in QGroundControl) and/or the module
+     `fw_ss_control/` (C code + C++ module + install script); in the PX4 shell: `fw_rate_control stop`,
+     `fw_ss_control start`.
+   - ArduPilot: `<name>.param` (firmware PID structure on both axes).
+
+   Fly any exported design in SITL with a model of the same aircraft before a real flight.
+
 Press **F1** anywhere for the user guide at the section of the current tab.
 
 ## Validation
@@ -109,14 +124,16 @@ Every algorithm is cross-checked against MATLAB R2025a (Control System and Robus
 | Check | Result |
 |---|---|
 | `acker`, `place`, `lqr`, `lqe`, `allmargin` | identical (5 significant digits) |
-| `hinfsyn` γ / `ncfsyn` γ_min | within ~0.6 % / identical |
+| `hinfsyn` γ / `ncfsyn` γ_min | within ~1 % / ~0.1 % |
 | Actuators (`pade`), `c2d` Tustin, discrete margins with delay | identical |
 | `diskmargin` (SISO and MIMO) | identical |
 | Exported MATLAB closed loop and generated Simulink model | match the app to 1e-5 … 1e-13 |
 | Linearisation from coefficients vs. reference MATLAB scripts | difference ≤ 1e-13 |
+| Exported flight controller (sensor inputs, normalized torque, trims) vs. the app's digital response | 1e-15 |
+| Generated C code (MSVC `/W4`, no warnings) vs. the Python reference | float precision (~1e-4) |
 
 The validation scripts are in [`tests/`](tests) (`validate*_make.py` writes the data, `validate*_matlab.m`
-compares).
+compares; `test_fc_export.py` checks the flight-controller export).
 
 ## Project structure
 
@@ -127,7 +144,7 @@ ui/          PySide6 interface — one module per tab, theme, help, project file
 data/        application icon
 tests/       smoke tests, headless UI test, benchmarks, MATLAB validation scripts
 installer/   Inno Setup script and build script for the Windows installer
-tools/       helper scripts (icon generation)
+tools/       helper scripts (icon generation, demo GIF recorder, PX4 SITL test kit in tools/px4_sitl)
 docs/        screenshots and the detailed documentation (Romanian: docs/README.ro.md)
 main.py      entry point (splash screen, self-test, opens a .sasproj passed on the command line)
 ```
@@ -137,6 +154,7 @@ main.py      entry point (splash screen, self-test, opens a .sasproj passed on t
 ```bash
 python tests/ui_test.py out          # end-to-end headless UI test: every tab, export, save/load
 python tests/smoke.py                # all modes x all methods, with and without actuators
+python tests/test_fc_export.py out   # PX4 / ArduPilot export: closed loop, C code (MSVC), parameter files
 python tests/bench.py                # timing benchmark
 ```
 

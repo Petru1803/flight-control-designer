@@ -9,17 +9,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def selftest(path):
-    """Check the frozen bundle: slycot/hinfsyn, envelopes, a full theta-hold design."""
+    """Check the frozen bundle: slycot/hinfsyn, envelopes, a full theta-hold design and the
+    PX4 / ArduPilot export (Course Jet, generic data)."""
     import numpy as np
-    from core import autopilot as ap, digital, hq, hq1797, sas
-    from core.models import LongModel
+    from core import autopilot as ap, digital, fccode, fcexport as fx, hq, hq1797, sas
+    from core.models import LatModel, LongModel
     lines = []
     try:
-        A = np.array([[-0.0071, 0.0301, 0, -9.78], [-0.133, -0.708, 152.4, -0.786],
-                      [0.000294, -0.0313, -1.328, 0], [0, 0, 1, 0]])
-        B = np.array([[0, 0.08], [-7.2238, 0], [-3.225, 0], [0, 0]])
-        lm = LongModel(A, B, "uwqt", 152.4)
-        r = sas.design_long_sas(lm, sas.auto_long_targets(lm, "B", "III"), "B", "III")
+        A = np.array([[-0.007979, -2.353849, 0, -9.81], [-0.000434, -1.052917, 0.992153, 0],
+                      [-0.000259, -8.787212, -0.968470, 0], [0, 0, 1, 0]])
+        B = np.array([[0, 7.69e-05], [-0.076286, 0], [-13.180818, 0], [0, 0]])
+        lm = LongModel(A, B, "Vaqt", 212.655)
+        r = sas.design_long_sas(lm, sas.auto_long_targets(lm, "B", "II-L"), "B", "II-L")
         act = ap.ActuatorSpec(0.05, 0.01)
         plant = ap.build_plant("theta", lm, r, actuator=act)
         st = ap.APSettings(ref=5, T=20)
@@ -31,6 +32,16 @@ def selftest(path):
         bw = hq1797.bandwidth(lm, r, act)
         lines.append(f"bandwidth: {bw['wbw']:.3f} rad/s, tau_p={bw['tau_p']:.3f}")
         lines.append("envelopes: " + ("ok" if hq.envelopes().get("cstar") is not None else "MISSING"))
+        Al = np.array([[-0.1335, -0.003607, -0.997124, 0.046131], [-20.614086, -3.580298, 0.924871, 0],
+                       [6.336297, -0.135076, -0.362320, 0], [0, 1, -0.003607, 0]])
+        Bl = np.array([[0, 0.028607], [25.324067, 3.928504], [0.225291, -3.858101], [0, 0]])
+        latm = LatModel(Al, Bl, 212.655)
+        dmax = {"de": np.radians(25), "da": np.radians(20), "dr": np.radians(25), "dT": np.inf}
+        dp = fx.design("pitch", "LQG", lm, latm, dmax, "PX4", act, Ts=0.01)
+        dr = fx.design("roll", "Hinf", lm, latm, dmax, "PX4", act, Ts=0.01)
+        files = fccode.px4_module([fx.to_discrete(dp), fx.to_discrete(dr)], {"name": "selftest", "V0": 212.655})
+        lines.append(f"PX4 export: pitch LQG digital={dp.digital['stable']}, roll Hinf digital={dr.digital['stable']}, "
+                     f"{len(files)} files")
         lines.append("SELFTEST OK")
     except Exception as e:  # noqa: BLE001
         import traceback

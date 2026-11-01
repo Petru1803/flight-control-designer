@@ -73,6 +73,7 @@ def collect(win):
         "ap_mode": sc.ap_mode.currentIndex(), "conv": sc.conv.currentData(), "computed": p.schedule is not None}
     data["export"] = {"folder": ex.folder.text(), "title": ex.title.text()}
     data["robust"] = win.robust_tab.state()
+    data["flight_controller"] = win.fc_tab.state()
     if p.aero:
         data["aero"] = p.aero
     return data
@@ -122,6 +123,8 @@ def apply_sync(win, data):
     s.min_eff.setChecked(sd.get("min_effort", True)); s.sas_lim.setValue(sd.get("sas_lim", 30.0))
     if "robust" in data:
         win.robust_tab.set_state(data["robust"])
+    if "flight_controller" in data:
+        win.fc_tab.set_state(data["flight_controller"])
     if win.project.long_model is not None:
         s.l_input.setCurrentIndex(sd["l_input"]); s.l_struct.setCurrentIndex(sd["l_struct"])
         s.wsp.setValue(sd["wsp"]); s.zsp.setValue(sd["zsp"]); s.wph.setValue(sd["wph"]); s.zph.setValue(sd["zph"])

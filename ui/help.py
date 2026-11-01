@@ -1,7 +1,7 @@
 """User guide shown in the Help panel (F1 opens the section of the current tab)."""
 from ui import theme
 
-TAB_ANCHORS = ["model", "sas", "hq", "autopilot", "robust", "schedule", "export"]
+TAB_ANCHORS = ["model", "sas", "hq", "autopilot", "robust", "schedule", "export", "fc"]
 
 
 def html():
@@ -170,6 +170,36 @@ each point's gains to its neighbours' plants (robustness between nodes).</p>
 <p>PDF report (all tables and figures), PNG figures, Excel workbook and CSV tables, including the discrete
 controller matrices. Figures are exported on a white background for printing unless <i>HUD style</i> is
 selected.</p>
+
+<h2><a name="fc"></a>8. PX4 / ARDUPILOT</h2>
+<p>Designs the attitude controller that runs on a fixed-wing autopilot (it replaces the SAS + attitude loops
+of the firmware) using only what the autopilot measures: body rates p, q, r, roll and pitch angles and, if
+fitted, airspeed. Angle of attack and sideslip are never fed back. Throttle stays with the firmware's energy
+controller (TECS); attitude setpoints still come from the firmware (sticks in Stabilized, navigation in Auto).</p>
+<table>
+<tr><td class="k">Firmware PID structure</td><td>the firmware's own loops: attitude error / time constant
+&rarr; rate setpoint; rate PI + feed-forward; yaw damper on r - (g/V)&phi; (ArduPlane: with its 0.2 rad/s
+washout). Tuned automatically on the same requirements as the Autopilot tab, plus the return from an attitude
+offset (so feed-forward alone cannot win) and a damping of at least 0.3 on every oscillatory mode. The search
+stays in physical ranges: rate-loop bandwidth 1-100 rad/s, integrator time 0.2-5 s, feed-forward up to twice its
+ideal value, time constant inside the firmware range. Exported as parameters: PX4 FW_P_TC, FW_PR_P/I/FF, FW_R_TC,
+FW_RR_P/I/FF, FW_YR_P, FW_AIRSPD_TRIM; ArduPlane PTCH2SRV_TCONST, PTCH_RATE_*, RLL2SRV_TCONST, RLL_RATE_*,
+YAW2SRV_DAMP, SCALING_SPEED (ArduPlane gains = normalized gains &times; &pi;/4).</td></tr>
+<tr><td class="k">LQG</td><td>LQI gains + a Kalman filter driven by the sensors (estimates &alpha; and &beta;);
+integral action on the measured attitude.</td></tr>
+<tr><td class="k">H&infin;</td><td>output feedback on the sensors and the attitude-error integrator.</td></tr>
+<tr><td class="k">Outputs</td><td>normalized torque in [-1, 1]: deflection / maximum deflection, signed so that
+a positive value gives a nose-up / right-wing-down / nose-right moment (PX4 vehicle_torque_setpoint).
+The maximum deflections must match the servo travel configured in the autopilot.</td></tr>
+<tr><td class="k">Digital check</td><td>every design is discretised (Tustin) at the controller rate and checked
+with a one-sample delay; the exported code is that discrete controller.</td></tr>
+<tr><td class="k">Export</td><td>PX4: parameter file (.params, QGroundControl) for the PID structure, and for
+any structure the module <b>fw_ss_control</b> (C code + C++ module, install script, README): stop
+fw_rate_control and start fw_ss_control. ArduPilot: .param file (PID structure on both axes only; ArduPlane
+cannot load an external controller).</td></tr>
+<tr><td class="k">Before flight</td><td>fly the design in SITL with a model of the same aircraft, check surface
+directions and limits, then fly conservatively. This is a design tool, not certified flight software.</td></tr>
+</table>
 
 <h2><a name="diag"></a>DIAGNOSTICS</h2>
 <p>The SAS, Handling qualities and Autopilot tabs list every requirement that is not met, why, and what to change

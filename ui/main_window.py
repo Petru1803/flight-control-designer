@@ -12,6 +12,7 @@ from ui import persist, theme
 from ui.project import Project
 from ui.tab_autopilot import AutopilotTab, digital_job, tune_job
 from ui.tab_export import ExportTab
+from ui.tab_fc import FCTab
 from ui.tab_hq import HQTab
 from ui.tab_model import ModelTab
 from ui.tab_robust import RobustTab
@@ -48,6 +49,7 @@ class MainWindow(QMainWindow):
         self.robust_tab = RobustTab(self)
         self.sched_tab = ScheduleTab(self)
         self.export_tab = ExportTab(self)
+        self.fc_tab = FCTab(self)
         self.tabs.addTab(self.model_tab, "1. Model")
         self.tabs.addTab(self.sas_tab, "2. SAS")
         self.tabs.addTab(self.hq_tab, "3. Handling qualities")
@@ -55,6 +57,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.robust_tab, "5. Robustness")
         self.tabs.addTab(self.sched_tab, "6. Gain schedule")
         self.tabs.addTab(self.export_tab, "7. Export")
+        self.tabs.addTab(self.fc_tab, "8. PX4 / ArduPilot")
         self.msg = QLabel("Enter the matrices in the Model tab and press 'Parse & analyse', or open a project.")
         self.bar = QProgressBar(); self.bar.setMaximumWidth(160); self.bar.setRange(0, 0); self.bar.hide()
         self.statusBar().addWidget(self.msg, 1)

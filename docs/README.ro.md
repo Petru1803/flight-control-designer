@@ -49,6 +49,12 @@ Aplicație desktop (Python + PySide6) construită pe baza scripturilor MATLAB di
      prefiltru, rate limit, saturație);
    - `<nume>_load('schedule', S, 0.75, 'long')` interpolează câștigurile programate.
 
+8. **PX4 / ArduPilot**: controler de atitudine pentru drone cu aripă fixă, doar pe senzorii autopilotului
+   (rate, unghiuri, viteza aerului; fără α/β). Structura PID a firmware-ului (reglată automat, export
+   `.params` PX4 / `.param` ArduPilot) sau LQG / H∞ cu reacție pe ieșiri (export cod C + modul PX4
+   `fw_ss_control`, care înlocuiește `fw_rate_control`). Întârzierea digitală (1,5 eșantioane) intră în
+   proiectare. `tests\test_fc_export.py` verifică bucla închisă, codul C (MSVC) și fișierele de parametri.
+
 **SAS cu efort minim** (implicit): țintele automate se caută în toată regiunea Level 1 (cu o margine față de
 limite) pentru cel mai mic bracaj la perturbațiile 5° α / 5°/s q (longitudinal) și 5° β / 10°/s p / 5°/s r
 (lateral). Fără bifă se folosesc țintele clasice.

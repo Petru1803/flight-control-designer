@@ -3,7 +3,7 @@
 ; Per-user install by default (no administrator rights); "install for all users" is offered in the wizard.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.1"
+  #define MyAppVersion "1.1.1"
 #endif
 #define MyAppName "SAS & Autopilot Designer"
 #define MyAppExe "SASDesigner.exe"
