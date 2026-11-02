@@ -70,6 +70,8 @@ to change when a requirement fails.
    *More info → Run anyway*.
 3. Start **SAS & Autopilot Designer** from the Start menu. Double-clicking a `.sasproj` file opens it directly.
 
+**If you do not want to download an .exe file, you can download the entire project and run main.py after you install requirements.txt.**
+
 ### From source
 
 ```bash
